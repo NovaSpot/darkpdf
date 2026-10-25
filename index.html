@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dimmer – PDF dark mode</title>
+<style>
+:root{
+  --bg:#121212; --surface:#1a1a1a; --raised:#232323; --line:#333333;
+  --text:#cfcfcf; --muted:#8c8c8c; --accent:#3b4a52; --accent-text:#d4dde0;
+  --err-bg:#1f1a1a; --err-line:#3d3030; --err-text:#c4a1a1;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:28px 24px 8px;max-width:960px;margin:0 auto}
+h1{font:400 28px/1.2 Georgia,"Times New Roman",serif;margin:0 0 6px;letter-spacing:.2px}
+header p{margin:0;color:var(--muted);max-width:60ch}
+main{max-width:960px;margin:0 auto;padding:16px 24px 64px}
+.bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
+.bar label.opt{display:flex;gap:8px;align-items:center;color:var(--muted)}
+button,.btn,select{font:inherit;color:var(--text);background:var(--raised);border:1px solid var(--line);border-radius:6px;padding:8px 14px;cursor:pointer}
+button.primary,.btn.primary{background:var(--accent);color:var(--accent-text);border-color:#4a5b64}
+button:disabled{opacity:.45;cursor:not-allowed}
+:focus-visible{outline:2px solid #9aa5aa;outline-offset:2px}
+input[type=file]{position:absolute;opacity:0;pointer-events:none}
+#drop{margin:20px 0;border:1px dashed var(--line);border-radius:8px;padding:48px 20px;text-align:center;color:var(--muted);background:var(--surface)}
+#drop.over{border-color:#6f8f9c}
+#progress{display:none;height:4px;margin-top:14px;background:var(--raised);border-radius:2px;overflow:hidden}
+#progress i{display:block;height:100%;width:0;background:#6f8f9c;transition:width .2s linear}
+@media (prefers-reduced-motion:reduce){#progress i{transition:none}}
+#msg{margin:14px 0 0;min-height:22px;color:var(--muted)}
+#msg.err{color:var(--err-text);background:var(--err-bg);border:1px solid var(--err-line);border-radius:6px;padding:10px 14px}
+#viewer{display:flex;flex-direction:column;align-items:center;gap:18px;padding-top:20px}
+.page{position:relative;background:#000;border:1px solid var(--line)}
+.page canvas{display:block}
+.textLayer{position:absolute;inset:0;overflow:hidden;line-height:1}
+.textLayer span,.textLayer br{color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0 0}
+.textLayer ::selection{background:rgba(111,143,156,.35)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Dimmer</h1>
+  <p>Turn a PDF dark. Text stays selectable, images keep their colours, and nothing leaves your browser.</p>
+</header>
+<main>
+  <div class="bar">
+    <label class="btn primary" for="file" tabindex="0" id="pick">Choose PDF</label>
+    <input id="file" type="file" accept="application/pdf">
+    <select id="shade" aria-label="Background shade">
+      <option value="soft">Soft black</option>
+      <option value="charcoal">Charcoal</option>
+      <option value="warm">Warm dark</option>
+    </select>
+    <label class="opt"><input type="checkbox" id="scan"> Scanned document (invert images too)</label>
+    <button id="dl" disabled>Download dark PDF</button>
+  </div>
+  <div id="progress" role="progressbar" aria-label="Conversion progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
+  <div id="msg" role="status"></div>
+  <div id="drop">Drop a PDF here, or use Choose PDF.</div>
+  <div id="viewer"></div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+const { PDFDocument, PDFName, PDFDict, PDFArray, PDFNumber, PDFBool, PDFRef, PDFStream } = PDFLib;
+const N = s => PDFName.of(s);
+
+// pdf.js worker: run the real worker code from a blob (works cross-origin and from file://),
+// and fall back to the plain CDN URL (pdf.js then runs without a separate worker).
+const WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const workerReady = (async () => {
+  try {
+    const code = await (await fetch(WORKER_URL)).text();
+    const blobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+    const w = new Worker(blobUrl);
+    w.addEventListener('error', () => {
+      console.warn('Worker error, switching to plain worker URL');
+      pdfjsLib.GlobalWorkerOptions.workerPort = null;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL;
+    });
+    pdfjsLib.GlobalWorkerOptions.workerPort = w;
+  } catch (e) {
+    console.warn('Worker fallback in use', e);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL;
+  }
+})();
+
+const SHADES = {
+  soft:     { bg: [.07, .07, .07], fg: [.82, .82, .82] },
+  charcoal: { bg: [.11, .11, .11], fg: [.80, .80, .80] },
+  warm:     { bg: [.10, .09, .08], fg: [.84, .81, .77] }
+};
+
+/* ---------- conversion ---------- */
+
+// Flip an image with /Decode (lossless) so the page-wide inversion restores it.
+function flipImage(doc, d) {
+  const mask = d.lookup(N('ImageMask'));
+  if (mask instanceof PDFBool && mask.asBoolean()) return;           // stencil: behaves like text
+  const bpc = d.lookup(N('BitsPerComponent'));
+  if (bpc instanceof PDFNumber && bpc.asNumber() === 1) return;      // 1-bit: line art / scans
+  const f = d.lookup(N('Filter'));
+  const filters = f instanceof PDFArray ? f.asArray() : [f];
+  if (filters.some(x => x === N('JPXDecode'))) return;               // Decode is ignored for JPX
+
+  const cs = d.lookup(N('ColorSpace'));
+  let n = 0;
+  if (cs instanceof PDFName) {
+    if (cs === N('DeviceGray') || cs === N('G')) n = 1;
+    else if (cs === N('DeviceRGB') || cs === N('RGB')) n = 3;
+  } else if (cs instanceof PDFArray) {
+    const kind = cs.lookup(0);
+    if (kind === N('ICCBased')) {
+      const s = cs.lookup(1);
+      const c = s instanceof PDFStream ? s.dict.lookup(N('N')) : null;
+      if (c instanceof PDFNumber && (c.asNumber() === 1 || c.asNumber() === 3)) n = c.asNumber();
+    } else if (kind === N('CalGray')) n = 1;
+    else if (kind === N('CalRGB')) n = 3;
+  }
+  if (!n) return; // Indexed, CMYK, Lab, Separation... not handled in v1
+
+  const old = d.lookup(N('Decode'));
+  const out = [];
+  if (old instanceof PDFArray && old.size() === n * 2) {
+    for (let i = 0; i < n; i++) {
+      out.push(old.lookup(2 * i + 1, PDFNumber).asNumber(), old.lookup(2 * i, PDFNumber).asNumber());
+    }
+  } else {
+    for (let i = 0; i < n; i++) out.push(1, 0);
+  }
+  d.set(N('Decode'), doc.context.obj(out));
+}
+
+function walkXObjects(doc, res, seen) {
+  if (!(res instanceof PDFDict)) return;
+  const xo = res.lookupMaybe(N('XObject'), PDFDict);
+  if (!xo) return;
+  for (const [, v] of xo.entries()) {
+    if (v instanceof PDFRef) { if (seen.has(v.tag)) continue; seen.add(v.tag); }
+    const obj = doc.context.lookup(v);
+    if (!(obj instanceof PDFStream)) continue;
+    const sub = obj.dict.lookup(N('Subtype'));
+    if (sub === N('Form')) walkXObjects(doc, obj.dict.lookupMaybe(N('Resources'), PDFDict), seen);
+    else if (sub === N('Image')) flipImage(doc, obj.dict);
+  }
+}
+
+function pageResources(node) {
+  let n = node, res;
+  while (n && !(res = n.lookupMaybe(N('Resources'), PDFDict))) n = n.Parent();
+  return res;
+}
+
+async function convert(bytes, opts, onProgress = () => {}) {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const ctx = doc.context;
+  const shade = SHADES[opts.shade];
+  const gs = bm => ctx.register(ctx.obj({ Type: 'ExtGState', BM: bm }));
+  const gsD = gs('Difference'), gsL = gs('Lighten'), gsK = gs('Darken');
+  const seen = new Set();
+  const c = a => a.map(v => v.toFixed(3)).join(' ');
+
+  const pages = doc.getPages();
+  for (let i = 0; i < pages.length; i++) {
+    if (opts.isStale && opts.isStale()) throw new Error('stale');
+    const page = pages[i];
+    if (!opts.scan) walkXObjects(doc, pageResources(page.node), seen);
+
+    const { x, y, width: w, height: h } = page.getMediaBox();
+    const rect = `${x} ${y} ${w} ${h} re`;
+    page.node.setExtGState(N('DKd'), gsD);
+    page.node.setExtGState(N('DKl'), gsL);
+    page.node.setExtGState(N('DKk'), gsK);
+
+    // opaque white paper first, so the blend layers always have a backdrop
+    const start = ctx.register(ctx.stream(`q 1 1 1 rg ${rect} f Q q\n`));
+    const end = ctx.register(ctx.stream(
+      `Q\n` +
+      `q /DKd gs 1 1 1 rg ${rect} f Q\n` +          // invert everything
+      `q /DKl gs ${c(shade.bg)} rg ${rect} f Q\n` + // black -> soft black
+      `q /DKk gs ${c(shade.fg)} rg ${rect} f Q\n`   // white -> soft white
+    ));
+    page.node.wrapContentStreams(start, end);
+    onProgress(i + 1, pages.length);
+    await new Promise(r => setTimeout(r)); // let the browser repaint
+  }
+  return await doc.save();
+}
+
+/* ---------- preview ---------- */
+
+const viewer = document.getElementById('viewer');
+let io;
+
+async function drawPage(page, box, scale) {
+  const vp = page.getViewport({ scale });
+  const dpr = window.devicePixelRatio || 1;
+  const cv = document.createElement('canvas');
+  cv.width = vp.width * dpr; cv.height = vp.height * dpr;
+  cv.style.width = vp.width + 'px'; cv.style.height = vp.height + 'px';
+  box.appendChild(cv);
+  await page.render({
+    canvasContext: cv.getContext('2d'), viewport: vp,
+    transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null
+  }).promise;
+  const tl = document.createElement('div');
+  tl.className = 'textLayer';
+  tl.style.setProperty('--scale-factor', scale);
+  box.appendChild(tl);
+  pdfjsLib.renderTextLayer({ textContentSource: await page.getTextContent(), container: tl, viewport: vp });
+}
+
+// Open the PDF; if the worker never answers, retry once without the worker port.
+async function openPdf(bytes) {
+  const attempt = async () => {
+    const task = pdfjsLib.getDocument({ data: bytes.slice() });
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('open timeout')), 12000));
+    try { return await Promise.race([task.promise, timeout]); }
+    catch (e) { task.destroy(); throw e; }
+  };
+  try { return await attempt(); }
+  catch (e) {
+    console.warn('Retrying with the plain worker URL', e);
+    pdfjsLib.GlobalWorkerOptions.workerPort = null;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL;
+    return await attempt();
+  }
+}
+
+async function preview(bytes) {
+  await workerReady;
+  const pdf = await openPdf(bytes);
+  if (io) io.disconnect();
+  viewer.innerHTML = '';
+  const first = await pdf.getPage(1);
+  const base = first.getViewport({ scale: 1 });
+  const scale = Math.min(1.6, (Math.min(viewer.clientWidth, 912) - 2) / base.width);
+
+  // Pages load lazily as they scroll into view; boxes start at page 1's size.
+  io = new IntersectionObserver(entries => entries.forEach(async e => {
+    const box = e.target;
+    if (!e.isIntersecting || box._done) return;
+    box._done = true;
+    try {
+      if (!box._page) box._page = await pdf.getPage(box._i);
+      const vp = box._page.getViewport({ scale });
+      box.style.width = vp.width + 'px'; box.style.height = vp.height + 'px';
+      await drawPage(box._page, box, scale);
+    } catch (err) { console.error('Page failed', box._i, err); }
+  }), { rootMargin: '700px' });
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const box = document.createElement('div');
+    box.className = 'page';
+    box.style.width = Math.round(base.width * scale) + 'px';
+    box.style.height = Math.round(base.height * scale) + 'px';
+    box._i = i;
+    if (i === 1) box._page = first;
+    viewer.appendChild(box);
+    io.observe(box);
+  }
+}
+
+/* ---------- ui ---------- */
+
+const $ = id => document.getElementById(id);
+let src = null, name = 'document', out = null, job = 0;
+
+function say(text, err) { const m = $('msg'); m.textContent = text; m.className = err ? 'err' : ''; }
+
+function progress(p, text) {
+  const bar = $('progress');
+  bar.style.display = p == null ? 'none' : 'block';
+  if (p != null) {
+    const pct = Math.round(p * 100);
+    bar.firstElementChild.style.width = pct + '%';
+    bar.setAttribute('aria-valuenow', pct);
+  }
+  if (text !== undefined) say(text);
+}
+
+async function run() {
+  if (!src) return;
+  const me = ++job;
+  $('dl').disabled = true;
+  progress(0.02, 'Reading file…');
+  await new Promise(r => setTimeout(r));
+  try {
+    const bytes = await convert(src, {
+      shade: $('shade').value,
+      scan: $('scan').checked,
+      isStale: () => me !== job
+    }, (i, n) => { if (me === job) progress(0.05 + 0.8 * (i / n), `Converting page ${i} of ${n}`); });
+    if (me !== job) return;
+    out = bytes;
+    progress(0.95, 'Preparing preview…');
+    await preview(out);
+    if (me !== job) return;
+    $('dl').disabled = false;
+    $('drop').style.display = 'none';
+    progress(1);
+    setTimeout(() => { if (me === job) progress(null, ''); }, 600);
+  } catch (e) {
+    if (me !== job) return; // superseded by a newer run
+    console.error(e);
+    progress(null);
+    say('This file could not be converted. It may be password-protected or damaged. Try another PDF.', true);
+  }
+}
+
+async function load(file) {
+  if (!file) return;
+  if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
+    say('That file is not a PDF. Choose a file ending in .pdf.', true); return;
+  }
+  name = file.name.replace(/\.pdf$/i, '');
+  src = new Uint8Array(await file.arrayBuffer());
+  run();
+}
+
+$('file').addEventListener('change', e => load(e.target.files[0]));
+$('pick').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } });
+$('shade').addEventListener('change', run);
+$('scan').addEventListener('change', run);
+$('dl').addEventListener('click', () => {
+  if (!out) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([out], { type: 'application/pdf' }));
+  a.download = name + '-dark.pdf';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+['dragover', 'dragenter'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); $('drop').classList.add('over'); }));
+['dragleave', 'drop'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); $('drop').classList.remove('over'); }));
+document.addEventListener('drop', e => load(e.dataTransfer.files[0]));
+</script>
+</body>
+</html>
