@@ -75,6 +75,4 @@ Because the original text and fonts are never touched, the text stays selectable
 
 Issues and pull requests are welcome. If a PDF converts badly, please open an issue and describe what looks wrong. If you can share the file, that helps a lot.
 
-## License
 
-Add a license of your choice, for example MIT, as `LICENSE` in the repository root.
