@@ -1,4 +1,4 @@
-# Dimmer
+# DarkPDF
 
 Turn any PDF from light mode to dark mode, right in your browser.
 
