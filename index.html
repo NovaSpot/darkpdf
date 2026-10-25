@@ -2,64 +2,108 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dimmer – PDF dark mode</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+<title>DarkPDF</title>
 <style>
-:root{
-  --bg:#121212; --surface:#1a1a1a; --raised:#232323; --line:#333333;
-  --text:#cfcfcf; --muted:#8c8c8c; --accent:#3b4a52; --accent-text:#d4dde0;
-  --err-bg:#1f1a1a; --err-line:#3d3030; --err-text:#c4a1a1;
-}
+:root{--bg:#121212;--bar:#1e1e1e;--bar-line:#2a2a2a;--text:#cfcfcf;--muted:#7d7d7d;--slate:#3b4a52;--slate-hi:#43545d;
+  --err-bg:#1f1a1a;--err-line:#3d3030;--err-text:#c4a1a1}
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-header{padding:28px 24px 8px;max-width:960px;margin:0 auto}
-h1{font:400 28px/1.2 Georgia,"Times New Roman",serif;margin:0 0 6px;letter-spacing:.2px}
-header p{margin:0;color:var(--muted);max-width:60ch}
-main{max-width:960px;margin:0 auto;padding:16px 24px 64px}
-.bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
-.bar label.opt{display:flex;gap:8px;align-items:center;color:var(--muted)}
-button,.btn,select{font:inherit;color:var(--text);background:var(--raised);border:1px solid var(--line);border-radius:6px;padding:8px 14px;cursor:pointer}
-button.primary,.btn.primary{background:var(--accent);color:var(--accent-text);border-color:#4a5b64}
-button:disabled{opacity:.45;cursor:not-allowed}
-:focus-visible{outline:2px solid #9aa5aa;outline-offset:2px}
-input[type=file]{position:absolute;opacity:0;pointer-events:none}
-#drop{margin:20px 0;border:1px dashed var(--line);border-radius:8px;padding:48px 20px;text-align:center;color:var(--muted);background:var(--surface)}
-#drop.over{border-color:#6f8f9c}
-#progress{display:none;height:4px;margin-top:14px;background:var(--raised);border-radius:2px;overflow:hidden}
+html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+#app{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 20px 64px}
+.has-doc #app{justify-content:flex-start;padding-top:20px}
+#hero{text-align:center;margin-bottom:36px}
+h1{font-size:clamp(40px,8vw,64px);font-weight:700;letter-spacing:-.02em;line-height:1.05;margin:0 0 16px;color:#ececec}
+.tag{margin:0 auto;max-width:62ch;color:#c4c4c4;font-size:clamp(15px,2.2vw,18px)}
+.hint{margin:14px 0 0;color:var(--muted);font-size:14px}
+.has-doc #hero{margin-bottom:16px}
+.has-doc h1{font-size:24px;margin:0}
+.has-doc .tag,.has-doc .hint{display:none}
+
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px;padding:8px;background:var(--bar);border:1px solid var(--bar-line);border-radius:999px}
+.has-doc .toolbar{position:sticky;top:12px;z-index:5}
+.choose,#dl,select,.check{height:56px;font:inherit;font-size:17px}
+.choose{display:inline-flex;align-items:center;gap:12px;padding:0 26px 0 20px;border-radius:999px;background:var(--slate);color:#e4e9eb;font-weight:700;cursor:pointer}
+.choose:hover{background:var(--slate-hi)}
+select{appearance:none;-webkit-appearance:none;border:0;border-radius:999px;color:var(--text);cursor:pointer;padding:0 34px 0 20px;
+  background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23cfcfcf' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center}
+select option{background:var(--bar);color:var(--text)}
+.check{position:relative;display:inline-flex;align-items:center;gap:10px;padding:0 18px;color:var(--text);cursor:pointer}
+.check input{position:absolute;opacity:0;width:1px;height:1px}
+.box{width:20px;height:20px;border-radius:6px;border:1.5px solid #7a7a7a;display:grid;place-items:center}
+.check input:checked + .box{background:#cfcfcf;border-color:#cfcfcf}
+.check input:checked + .box::after{content:"";width:5px;height:10px;border:solid #1a1a1a;border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+#dl{padding:0 30px;border:0;border-radius:999px;background:#2e2e2e;color:#e0e0e0;font-weight:700;cursor:pointer}
+#dl:hover:not(:disabled){background:#383838}
+#dl:disabled{opacity:.5;cursor:not-allowed}
+.check input:focus-visible + .box,.choose:focus-visible,select:focus-visible,#dl:focus-visible{outline:2px solid #9aa5aa;outline-offset:2px}
+input[type=file]{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+
+#progress{display:none;width:min(640px,100%);height:4px;margin:20px auto 0;background:var(--bar);border-radius:2px;overflow:hidden}
 #progress i{display:block;height:100%;width:0;background:#6f8f9c;transition:width .2s linear}
 @media (prefers-reduced-motion:reduce){#progress i{transition:none}}
-#msg{margin:14px 0 0;min-height:22px;color:var(--muted)}
-#msg.err{color:var(--err-text);background:var(--err-bg);border:1px solid var(--err-line);border-radius:6px;padding:10px 14px}
-#viewer{display:flex;flex-direction:column;align-items:center;gap:18px;padding-top:20px}
-.page{position:relative;background:#000;border:1px solid var(--line)}
+#msg{width:min(640px,100%);margin:14px auto 0;min-height:22px;text-align:center;color:var(--muted);font-size:14px}
+#msg.err{color:var(--err-text);background:var(--err-bg);border:1px solid var(--err-line);border-radius:12px;padding:10px 14px;font-size:15px}
+
+#viewer{width:100%;display:flex;flex-direction:column;align-items:center;gap:18px;padding-top:20px}
+.page{position:relative;background:#000;border:1px solid #2a2a2a}
 .page canvas{display:block}
 .textLayer{position:absolute;inset:0;overflow:hidden;line-height:1}
 .textLayer span,.textLayer br{color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0 0}
 .textLayer ::selection{background:rgba(111,143,156,.35)}
+
+#veil{display:none;position:fixed;inset:16px;z-index:20;place-items:center;pointer-events:none;border:2px dashed #4a5b64;border-radius:28px;background:rgba(18,18,18,.9);color:#c4c4c4;font-size:20px;font-weight:500}
+body.dragging #veil{display:grid}
+
+@media (max-width:780px){
+  #app{min-height:100dvh;padding-bottom:250px}
+  .has-doc #app{padding-bottom:190px}
+  .toolbar,.has-doc .toolbar{
+    display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px;border-radius:28px;
+    position:fixed;top:auto;left:50%;transform:translateX(-50%);
+    bottom:max(12px,env(safe-area-inset-bottom));width:min(440px,calc(100% - 24px));
+    z-index:10;box-shadow:0 -10px 28px 8px rgba(18,18,18,.92)}
+  .choose,#dl{grid-column:1/-1;justify-content:center;height:52px;font-size:16px}
+  select,.check{height:48px;font-size:16px;justify-content:center;background-color:#252525;border-radius:999px}
+  select{padding:0 34px;text-align:center;text-align-last:center}
+  /* once a PDF is open, compact to two rows so the preview keeps room */
+  .has-doc .choose{grid-column:1;padding:0 12px;gap:8px}
+  .has-doc #dl{grid-column:2;padding:0 12px}
+}
 </style>
 </head>
 <body>
-<header>
-  <h1>Dimmer</h1>
-  <p>Turn a PDF dark. Text stays selectable, images keep their colours, and nothing leaves your browser.</p>
-</header>
-<main>
-  <div class="bar">
-    <label class="btn primary" for="file" tabindex="0" id="pick">Choose PDF</label>
+<main id="app">
+  <section id="hero">
+    <h1>DarkPDF</h1>
+    <p class="tag">Turn a PDF dark. Text stays selectable, images keep their colours, and nothing leaves your browser.</p>
+    <p class="hint">Drop a PDF anywhere on this page, or choose one below.</p>
+  </section>
+
+  <div class="toolbar" role="group" aria-label="Conversion options">
+    <label class="choose" for="file" tabindex="0" id="pick">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path d="M3 9v17a1 1 0 0 0 1 1h17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><rect x="8" y="3" width="19" height="19" rx="3" fill="currentColor"/><text x="17.5" y="16.2" text-anchor="middle" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="8.5" fill="#3b4a52">PDF</text></svg>
+      <span>Choose PDF</span>
+    </label>
     <input id="file" type="file" accept="application/pdf">
     <select id="shade" aria-label="Background shade">
       <option value="soft">Soft black</option>
-      <option value="charcoal">Charcoal</option>
+      <option value="charcoal" selected>Charcoal</option>
       <option value="warm">Warm dark</option>
     </select>
-    <label class="opt"><input type="checkbox" id="scan"> Scanned document (invert images too)</label>
-    <button id="dl" disabled>Download dark PDF</button>
+    <label class="check" title="Turn this on for scanned PDFs, where each page is one big image.">
+      <input type="checkbox" id="scan"><span class="box" aria-hidden="true"></span>Invert images
+    </label>
+    <button id="dl" disabled>Download</button>
   </div>
+
   <div id="progress" role="progressbar" aria-label="Conversion progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
   <div id="msg" role="status"></div>
-  <div id="drop">Drop a PDF here, or use Choose PDF.</div>
   <div id="viewer"></div>
 </main>
+<div id="veil" aria-hidden="true">Drop your PDF to make it dark</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -261,6 +305,7 @@ async function preview(bytes) {
     viewer.appendChild(box);
     io.observe(box);
   }
+  return pdf.numPages;
 }
 
 /* ---------- ui ---------- */
@@ -296,12 +341,12 @@ async function run() {
     if (me !== job) return;
     out = bytes;
     progress(0.95, 'Preparing preview…');
-    await preview(out);
+    const pageCount = await preview(out);
     if (me !== job) return;
     $('dl').disabled = false;
-    $('drop').style.display = 'none';
+    document.body.classList.add('has-doc');
     progress(1);
-    setTimeout(() => { if (me === job) progress(null, ''); }, 600);
+    setTimeout(() => { if (me === job) progress(null, `${name}.pdf (${pageCount} page${pageCount === 1 ? '' : 's'})`); }, 600);
   } catch (e) {
     if (me !== job) return; // superseded by a newer run
     console.error(e);
@@ -332,8 +377,12 @@ $('dl').addEventListener('click', () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 });
-['dragover', 'dragenter'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); $('drop').classList.add('over'); }));
-['dragleave', 'drop'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); $('drop').classList.remove('over'); }));
+['dragover', 'dragenter'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); document.body.classList.add('dragging'); }));
+['dragleave', 'drop'].forEach(t => document.addEventListener(t, e => {
+  e.preventDefault();
+  if (t === 'dragleave' && e.relatedTarget) return;
+  document.body.classList.remove('dragging');
+}));
 document.addEventListener('drop', e => load(e.dataTransfer.files[0]));
 </script>
 </body>
